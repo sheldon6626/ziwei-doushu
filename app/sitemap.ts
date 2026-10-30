@@ -24,6 +24,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${BASE_URL}/heming`, priority: 0.7, changeFrequency: 'weekly', lastModified: lastmod },
     { url: `${BASE_URL}/library`, priority: 0.85, changeFrequency: 'weekly', lastModified: lastmod },
     { url: `${BASE_URL}/knowledge`, priority: 0.9, changeFrequency: 'weekly', lastModified: lastmod },
+    { url: `${BASE_URL}/tianji`, priority: 0.85, changeFrequency: 'weekly', lastModified: lastmod },
+    { url: `${BASE_URL}/diji`, priority: 0.8, changeFrequency: 'weekly', lastModified: lastmod },
+    { url: `${BASE_URL}/renji`, priority: 0.85, changeFrequency: 'weekly', lastModified: lastmod },
     { url: `${BASE_URL}/terms`, priority: 0.3, changeFrequency: 'monthly', lastModified: lastmod },
     { url: `${BASE_URL}/privacy`, priority: 0.3, changeFrequency: 'monthly', lastModified: lastmod },
   ];

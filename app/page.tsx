@@ -140,41 +140,45 @@ const SECTIONS = [
     key: 'ziwei',
     name: '紫微',
     en: 'Zi Wei',
-    desc: '14 主星 · 13 宫位 · AI 解读',
+    desc: '14 主星 · 13 宫位 · 命盘排盘',
     status: 'ready' as const,
-    when: '5 月',
+    when: '已上线',
     icon: '◉',  // 实心圆+内点，紫微星视觉
     note: '',
+    href: '/chart',
   },
   {
     key: 'tianji',
     name: '天纪',
     en: 'Tian Ji',
     desc: '紫微 · 周易 · 奇门遁甲',
-    status: 'soon' as const,
-    when: '6 月',
+    status: 'ready' as const,
+    when: '已上线',
     icon: '⊙',  // 圆+内点（古文"日"），与 ◉ 同字宽
-    note: '',
+    note: '易经·堪舆',
+    href: '/tianji',
   },
   {
     key: 'diji',
     name: '地纪',
     en: 'Di Ji',
-    desc: '倪师未竟之业 · 后辈补注',
-    status: 'soon' as const,
-    when: '6 月',
+    desc: '倪师未竟之业 · 山川地理',
+    status: 'ready' as const,
+    when: '已上线',
     icon: '⊞',  // 方+井（地/田视觉），与 ⊙ 同字宽
-    note: '遗稿研读',
+    note: '山川龙脉',
+    href: '/diji',
   },
   {
     key: 'renji',
     name: '人纪',
     en: 'Ren Ji',
     desc: '内经 · 伤寒 · 金匮 · 针灸',
-    status: 'soon' as const,
-    when: '7 月',
+    status: 'ready' as const,
+    when: '已上线',
     icon: '⊕',  // 圆+十字（医道/阴阳调和），与 ⊙/⊞ 同字宽
-    note: '',
+    note: '经方针灸',
+    href: '/renji',
   },
 ];
 
@@ -742,34 +746,31 @@ export default function HomePage() {
                   initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.15, duration: 0.5 }}
                   viewport={{ once: true }}
-                  className="relative flex flex-row lg:flex-col items-center lg:items-center text-left lg:text-center gap-4 lg:gap-0">
+                  className="relative">
+                  <a href={s.href} className="flex flex-row lg:flex-col items-center lg:items-center text-left lg:text-center gap-4 lg:gap-0 no-underline cursor-pointer group">
                   {/* 节点圆 */}
-                  <div className="relative w-14 h-14 shrink-0 rounded-full flex items-center justify-center lg:mb-3"
+                  <div className="relative w-14 h-14 shrink-0 rounded-full flex items-center justify-center lg:mb-3 transition-transform group-hover:scale-105"
                     style={{
-                      background: ready
-                        ? `linear-gradient(135deg, ${c.goldSolid} 0%, ${c.goldSolid}cc 100%)`
-                        : (theme === 'dark' ? 'rgba(184,146,42,0.05)' : '#fdf8ee'),
-                      border: ready ? 'none' : `2px dashed ${c.goldLine}`,
-                      color: ready ? '#fff' : c.textMuted,
-                      boxShadow: ready ? `0 4px 16px ${c.goldSolid}55` : 'none',
+                      background: `linear-gradient(135deg, ${c.goldSolid} 0%, ${c.goldSolid}cc 100%)`,
+                      border: 'none',
+                      color: '#fff',
+                      boxShadow: `0 4px 16px ${c.goldSolid}55`,
                     }}>
                     <span className="text-2xl">{s.icon}</span>
-                    {ready && (
-                      <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] text-white"
-                        style={{ background: '#10b981', boxShadow: '0 2px 6px rgba(16,185,129,0.4)' }}>
-                        ✓
-                      </div>
-                    )}
+                    <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] text-white"
+                      style={{ background: '#10b981', boxShadow: '0 2px 6px rgba(16,185,129,0.4)' }}>
+                      ✓
+                    </div>
                   </div>
                   {/* 文字组：手机端右排单列；桌面端居中堆叠 */}
                   <div className="flex-1 lg:flex-none flex flex-col items-start lg:items-center min-w-0">
                     {/* 顶行：时间标签 + 板块名 + note（手机端 inline；桌面端依然分行） */}
                     <div className="flex items-baseline gap-2 lg:flex-col lg:gap-0 lg:mb-1">
                       <div className="text-[10px] tracking-[0.25em] lg:mb-1.5"
-                        style={{ color: ready ? '#10b981' : c.textMuted, fontWeight: 500 }}>
+                        style={{ color: '#10b981', fontWeight: 500 }}>
                         {s.when}
                       </div>
-                      <div className="text-base lg:text-xl font-semibold tracking-[0.15em]"
+                      <div className="text-base lg:text-xl font-semibold tracking-[0.15em] transition-colors group-hover:text-amber-400"
                         style={{ color: c.textPrimary }}>
                         {s.name}
                       </div>
@@ -803,6 +804,7 @@ export default function HomePage() {
                       {s.desc}
                     </div>
                   </div>
+                  </a>
                 </motion.div>
               );
             })}
@@ -1141,28 +1143,26 @@ export default function HomePage() {
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
             {SECTIONS.map(s => {
-              const ready = s.status === 'ready';
               return (
                 <a
                   key={s.key}
-                  href={ready ? '/chart' : undefined}
-                  onClick={ready ? undefined : (e) => e.preventDefault()}
-                  className="rounded-lg px-3 py-3 text-center transition-all"
+                  href={s.href}
+                  className="rounded-lg px-3 py-3 text-center transition-all cursor-pointer hover:scale-[1.02]"
                   style={{
-                    background: ready ? c.starBg : 'transparent',
-                    border: `1px ${ready ? 'solid' : 'dashed'} ${ready ? c.goldLine : c.navBorder}`,
-                    cursor: ready ? 'pointer' : 'not-allowed',
-                    opacity: ready ? 1 : 0.5,
+                    background: c.starBg,
+                    border: `1px solid ${c.goldLine}`,
+                    cursor: 'pointer',
+                    opacity: 1,
                     textDecoration: 'none',
                   }}
                 >
                   <div className="text-base font-semibold mb-0.5 tracking-[0.1em]"
-                    style={{ color: ready ? c.goldSolid : c.textMuted }}>
+                    style={{ color: c.goldSolid }}>
                     {s.name}
                   </div>
                   <div className="text-[9px] tracking-wider"
-                    style={{ color: ready ? '#10b981' : c.textMuted }}>
-                    {ready ? '✓ 已上线' : `${s.when} 开放`}
+                    style={{ color: '#10b981' }}>
+                    ✓ 已上线
                   </div>
                 </a>
               );
