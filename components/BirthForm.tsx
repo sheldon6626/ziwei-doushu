@@ -171,11 +171,20 @@ export default function BirthForm({ onSubmit, loading, initialData, onFormSave, 
     border: `1px solid ${inputBorder}`,
     color: inputClr,
     borderRadius: '14px',
-    padding: '10px 14px',
-    fontSize: '13px',
+    padding: '11px 16px',
+    fontSize: 'clamp(13px, 1.05vw, 15px)',
     width: '100%',
     outline: 'none',
     transition: 'border-color 0.2s',
+  } as React.CSSProperties;
+
+  const labelStyle = {
+    display: 'block',
+    fontSize: 'clamp(11px, 0.95vw, 13px)',
+    color: labelClr,
+    marginBottom: '6px',
+    letterSpacing: '0.05em',
+    fontWeight: 500,
   } as React.CSSProperties;
 
   const errorInputStyle = { ...inputStyle, borderColor: errorClr };
@@ -189,7 +198,7 @@ export default function BirthForm({ onSubmit, loading, initialData, onFormSave, 
             animate={{ opacity: 1, y: 0, height: 'auto' }}
             exit={{ opacity: 0, y: -4, height: 0 }}
             transition={{ duration: 0.18 }}
-            style={{ color: errorClr, fontSize: '11px', marginTop: '4px' }}
+            style={{ color: errorClr, fontSize: 'clamp(11px, 0.9vw, 12px)', marginTop: '4px' }}
           >
             ✕ {msg}
           </motion.p>

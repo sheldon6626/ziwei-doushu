@@ -1,8 +1,9 @@
 'use client';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { ZiweiChart, Palace } from '@/lib/ziwei/types';
 import type { TimeView } from './TimeNav';
+import { generateLocalInterpretation } from '@/lib/ziwei/interpreter';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -21,6 +22,22 @@ interface InsightPanelProps {
   selectedPalace?: Palace | null;
   selectedSiHua?: SelectedSiHua | null;
 }
+
+interface AiConfig {
+  enabled: boolean;
+  provider: 'local' | 'deepseek' | 'openai' | 'custom';
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+}
+
+const DEFAULT_AI_CONFIG: AiConfig = {
+  enabled: false,
+  provider: 'local',
+  apiKey: '',
+  baseUrl: 'https://api.deepseek.com/v1',
+  model: 'deepseek-chat',
+};
 
 const TOPICS = [
   { key: 'overview',     label: '命格' },
@@ -154,7 +171,7 @@ function AiContent({ text, streaming }: { text: string; streaming?: boolean }) {
         if (sectionMatch) {
           return (
             <div key={i} className="pt-3 pb-0.5 first:pt-0">
-              <span className="text-[11px] font-semibold tracking-wide" style={{ color: 'var(--t-gold)' }}>
+              <span className="text-[11px] md:text-xs font-semibold tracking-wide" style={{ color: 'var(--t-gold)' }}>
                 【{sectionMatch[1]}】
               </span>
             </div>
@@ -163,7 +180,7 @@ function AiContent({ text, streaming }: { text: string; streaming?: boolean }) {
         if (line.trim() === '') return <div key={i} className="h-1" />;
         const parts = line.split(/\*\*(.+?)\*\*/);
         return (
-          <div key={i} className="text-[11px] leading-relaxed" style={{ color: 'var(--t-text2)' }}>
+          <div key={i} className="text-[11px] md:text-xs leading-relaxed" style={{ color: 'var(--t-text2)' }}>
             {parts.map((part, j) =>
               j % 2 === 0
                 ? part
@@ -187,7 +204,28 @@ export default function InsightPanel({ chart, selectedPalace, selectedSiHua }: I
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [activeTopic, setActiveTopic] = useState<string>('overview');
-  const messagesRef = useRef<Message[]>([]); // always-current copy for closures
+  const [showSettings, setShowSettings] = useState(false);
+
+  // AI 配置管理 (保存在 localStorage)
+  const [aiConfig, setAiConfig] = useState<AiConfig>(DEFAULT_AI_CONFIG);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('ziwei_ai_config');
+      if (saved) {
+        setAiConfig(JSON.parse(saved));
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const saveAiConfig = (cfg: AiConfig) => {
+    setAiConfig(cfg);
+    try {
+      localStorage.setItem('ziwei_ai_config', JSON.stringify(cfg));
+    } catch { /* ignore */ }
+  };
+
+  const messagesRef = useRef<Message[]>([]);
   const loadingRef = useRef(false);
   const autoLoaded = useRef(false);
   const lastPalaceBranch = useRef<number | undefined>(undefined);
@@ -209,7 +247,7 @@ export default function InsightPanel({ chart, selectedPalace, selectedSiHua }: I
   useEffect(() => {
     if (autoLoaded.current) return;
     autoLoaded.current = true;
-    sendMessage(TOPIC_PROMPTS.overview, true);
+    sendMessage(TOPIC_PROMPTS.overview, true, 'overview');
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Inject palace analysis when palace selected
@@ -237,7 +275,7 @@ ${selectedPalace.name}在命盘中的意义，以及这种星曜配置的整体�
 **【实际建议】**
 基于此宫的具体建议。`;
 
-    sendMessage(prompt, true);
+    sendMessage(prompt, true, undefined, selectedPalace);
   }, [selectedPalace]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 注入四化飞化分析
@@ -271,61 +309,141 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
 **【实际建议】**
 基于此四化的具体可操作建议。`;
 
-    sendMessage(prompt, true);
+    sendMessage(prompt, true, undefined, undefined, selectedSiHua);
   }, [selectedSiHua]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const streamResponse = async (apiMessages: { role: 'user' | 'assistant'; content: string }[]) => {
-    try {
-      const res = await fetch('/api/interpret', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chart, messages: apiMessages }),
+  // 模拟本地流式打字效果
+  const simulateLocalStream = async (fullText: string) => {
+    setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+    let current = '';
+    const chunkSize = 4;
+    for (let i = 0; i < fullText.length; i += chunkSize) {
+      current += fullText.slice(i, i + chunkSize);
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { role: 'assistant', content: current };
+        return updated;
       });
-      if (res.status === 404) throw new Error('api-missing');
-      if (!res.ok) throw new Error('请求失败');
-      if (!res.body) throw new Error('无响应流');
+      await new Promise(r => setTimeout(r, 16));
+    }
+  };
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let assistantText = '';
+  // 在线调用大模型 (DeepSeek / OpenAI 兼容)
+  const callOnlineLlmStream = async (
+    apiMessages: { role: 'user' | 'assistant'; content: string }[],
+    config: AiConfig
+  ): Promise<boolean> => {
+    const endpoint = config.baseUrl.replace(/\/+$/, '') + '/chat/completions';
+    const systemPrompt = `你是一位精通倪海厦天纪理论与《紫微斗数全书》正宗三合派的紫微斗数大师。根据用户的命盘信息与提问，严格按用户的格式要求进行专业、深刻、引经据典的命理解读。命盘纳音为${chart.wuxingJuName}，命宫在${chart.mingGongBranch}支，身宫在${chart.shenGongBranch}支。`;
 
-      setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey.trim()}`,
+      },
+      body: JSON.stringify({
+        model: config.model.trim() || 'deepseek-chat',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...apiMessages,
+        ],
+        stream: true,
+      }),
+    });
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        for (const line of chunk.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6);
-          if (data === '[DONE]') break;
-          try {
-            const delta = JSON.parse(data).delta?.text ?? '';
+    if (!res.ok || !res.body) {
+      throw new Error(`LLM API 响应异常: ${res.status} ${res.statusText}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let assistantText = '';
+    setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      for (const line of chunk.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const data = trimmed.replace(/^data:\s*/, '');
+        if (data === '[DONE]') break;
+        try {
+          const parsed = JSON.parse(data);
+          const delta = parsed.choices?.[0]?.delta?.content ?? '';
+          if (delta) {
             assistantText += delta;
             setMessages(prev => {
               const updated = [...prev];
               updated[updated.length - 1] = { role: 'assistant', content: assistantText };
               return updated;
             });
-          } catch { /* skip */ }
+          }
+        } catch { /* skip */ }
+      }
+    }
+    return true;
+  };
+
+  const streamResponse = async (
+    apiMessages: { role: 'user' | 'assistant'; content: string }[],
+    topicKey?: string,
+    palace?: Palace | null,
+    sihua?: SelectedSiHua | null
+  ) => {
+    try {
+      // 1. 若用户开启并配置了在线大模型 API Key
+      if (aiConfig.enabled && aiConfig.apiKey.trim()) {
+        try {
+          await callOnlineLlmStream(apiMessages, aiConfig);
+          return;
+        } catch (onlineErr) {
+          console.warn('在线大模型调用失败，自动回退到本地离线引擎:', onlineErr);
+          // 回退到本地引擎
         }
       }
+
+      // 2. 本地倪海厦离线断语规则引擎（毫秒级生成，流式逐字呈现）
+      const lastUserMsg = apiMessages[apiMessages.length - 1]?.content || '';
+      const localResult = generateLocalInterpretation({
+        chart,
+        topic: topicKey,
+        userPrompt: topicKey ? undefined : lastUserMsg,
+        selectedPalace: palace,
+        selectedSiHua: sihua,
+      });
+
+      await simulateLocalStream(localResult);
     } catch (e) {
-      const missing = e instanceof Error && e.message === 'api-missing';
-      setMessages(prev => [...prev, { role: 'assistant', content: missing ? '开源版不含 AI 解读接口（/api/interpret），需要你自己实现后才能用，详见 README「快速开始」。排盘本身不需要任何 API Key。' : '解读失败，请稍后重试。' }]);
+      console.error('解读生成异常:', e);
+      // 万一发生未捕获异常，给出友好指导与重试选项，绝不让用户困惑
+      setMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: '【解读提醒】当前处于本地离线模式。如需大模型深度个性化实时对话，可点击右上角「⚙️ 设置」填入 DeepSeek API Key 体验。',
+        },
+      ]);
     } finally {
       setLoading(false);
       loadingRef.current = false;
     }
   };
 
-  const sendMessage = (text: string, hidden = false) => {
+  const sendMessage = (
+    text: string,
+    hidden = false,
+    topicKey?: string,
+    palace?: Palace | null,
+    sihua?: SelectedSiHua | null
+  ) => {
     if (!text.trim() || loadingRef.current) return;
     loadingRef.current = true;
     setLoading(true);
 
     const userMsg: Message = { role: 'user', content: text, hidden };
-    // Capture current messages synchronously via ref (avoids stale closure)
     const apiMessages = [...messagesRef.current, userMsg].map(m => ({
       role: m.role,
       content: m.content,
@@ -333,54 +451,209 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
 
     setMessages(prev => [...prev, userMsg]);
     setInput('');
-    streamResponse(apiMessages);
+    streamResponse(apiMessages, topicKey, palace, sihua);
   };
 
   const handleTopicClick = (topicKey: string) => {
     if (loadingRef.current) return;
     setActiveTopic(topicKey);
-    sendMessage(TOPIC_PROMPTS[topicKey], true);
+    sendMessage(TOPIC_PROMPTS[topicKey], true, topicKey);
   };
 
   const handleSend = () => {
-    sendMessage(input);
+    sendMessage(input, false, undefined);
   };
 
   return (
-    <div className="flex flex-col h-full rounded-xl overflow-hidden card-glass">
+    <div className="flex flex-col h-full rounded-xl overflow-hidden card-glass relative">
 
-      {/* ── Topic buttons ── */}
-      <div className="flex-shrink-0 px-2 pt-2.5 pb-2" style={{ borderBottom: '1px solid var(--t-border)' }}>
-        <div className="grid grid-cols-6 gap-1">
-          {TOPICS.map(t => {
-            const isActive = activeTopic === t.key;
-            return (
-              <button
-                key={t.key}
-                onClick={() => handleTopicClick(t.key)}
-                disabled={loading}
-                className="py-1.5 text-[10px] font-medium rounded-lg transition-all duration-150 disabled:opacity-40"
-                style={{
-                  background: isActive ? 'rgba(212,168,67,0.12)' : 'transparent',
-                  border: `1px solid ${isActive ? 'rgba(212,168,67,0.3)' : 'var(--t-border)'}`,
-                  color: isActive ? 'var(--t-gold)' : 'var(--t-faint)',
-                }}
-              >
-                {t.label}
-              </button>
-            );
-          })}
+      {/* ── Header Bar: Topic buttons + Settings ── */}
+      <div className="flex-shrink-0 px-2 pt-2.5 pb-2 md:px-3 md:py-2.5" style={{ borderBottom: '1px solid var(--t-border)' }}>
+        <div className="flex items-center gap-1.5 justify-between">
+          <div className="grid grid-cols-6 gap-1 flex-1">
+            {TOPICS.map(t => {
+              const isActive = activeTopic === t.key;
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => handleTopicClick(t.key)}
+                  disabled={loading}
+                  className="py-1.5 text-[10px] md:text-xs font-medium rounded-lg transition-all duration-150 disabled:opacity-40"
+                  style={{
+                    background: isActive ? 'rgba(212,168,67,0.14)' : 'transparent',
+                    border: `1px solid ${isActive ? 'rgba(212,168,67,0.35)' : 'var(--t-border)'}`,
+                    color: isActive ? 'var(--t-gold)' : 'var(--t-faint)',
+                  }}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 设置按钮 */}
+          <button
+            onClick={() => setShowSettings(true)}
+            title="AI 解读设置"
+            className="px-2 py-1.5 text-[10px] rounded-lg transition-all flex items-center gap-1 flex-shrink-0"
+            style={{
+              background: aiConfig.enabled && aiConfig.apiKey ? 'rgba(212,168,67,0.15)' : 'var(--t-card)',
+              border: '1px solid var(--t-border)',
+              color: aiConfig.enabled && aiConfig.apiKey ? 'var(--t-gold)' : 'var(--t-faint)',
+            }}
+          >
+            <span>⚙️</span>
+            <span className="hidden sm:inline">{aiConfig.enabled && aiConfig.apiKey ? '在线大模型' : '本地引擎'}</span>
+          </button>
         </div>
       </div>
 
-      {/* ── Messages ── */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
+      {/* ── Settings Modal ── */}
+      {showSettings && (
+        <div className="absolute inset-0 z-30 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div
+            className="w-full max-w-sm rounded-xl p-5 space-y-4 shadow-2xl"
+            style={{ background: 'var(--t-card)', border: '1px solid var(--t-border)', color: 'var(--t-text)' }}
+          >
+            <div className="flex items-center justify-between pb-2" style={{ borderBottom: '1px solid var(--t-border)' }}>
+              <div className="flex items-center gap-2">
+                <span style={{ color: 'var(--t-gold)' }}>✦</span>
+                <h3 className="text-sm font-semibold tracking-wide">AI 命理解读设置</h3>
+              </div>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="text-xs px-2 py-1 rounded hover:opacity-80"
+                style={{ color: 'var(--t-faint)' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="text-[11px] leading-relaxed" style={{ color: 'var(--t-text2)' }}>
+              默认采用<strong style={{ color: 'var(--t-gold)' }}>本地正宗倪海厦离线断语引擎</strong>，无需网络和 Key 即可开箱即用。若需接入 DeepSeek 或 OpenAI 体验更自由的实时大模型追问，可在下方填入您的 API Key。
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] block mb-1 font-medium" style={{ color: 'var(--t-faint)' }}>运行模式</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => saveAiConfig({ ...aiConfig, enabled: false })}
+                    className="py-1.5 text-xs rounded-lg border font-medium transition-all"
+                    style={{
+                      background: !aiConfig.enabled ? 'rgba(212,168,67,0.15)' : 'transparent',
+                      borderColor: !aiConfig.enabled ? 'var(--t-gold)' : 'var(--t-border)',
+                      color: !aiConfig.enabled ? 'var(--t-gold)' : 'var(--t-faint)',
+                    }}
+                  >
+                    本地离线引擎（默认）
+                  </button>
+                  <button
+                    onClick={() => saveAiConfig({ ...aiConfig, enabled: true })}
+                    className="py-1.5 text-xs rounded-lg border font-medium transition-all"
+                    style={{
+                      background: aiConfig.enabled ? 'rgba(212,168,67,0.15)' : 'transparent',
+                      borderColor: aiConfig.enabled ? 'var(--t-gold)' : 'var(--t-border)',
+                      color: aiConfig.enabled ? 'var(--t-gold)' : 'var(--t-faint)',
+                    }}
+                  >
+                    在线大模型 (BYOK)
+                  </button>
+                </div>
+              </div>
+
+              {aiConfig.enabled && (
+                <>
+                  <div>
+                    <label className="text-[10px] block mb-1 font-medium" style={{ color: 'var(--t-faint)' }}>模型服务商</label>
+                    <select
+                      value={aiConfig.provider}
+                      onChange={e => {
+                        const prov = e.target.value as any;
+                        let baseUrl = aiConfig.baseUrl;
+                        let model = aiConfig.model;
+                        if (prov === 'deepseek') {
+                          baseUrl = 'https://api.deepseek.com/v1';
+                          model = 'deepseek-chat';
+                        } else if (prov === 'openai') {
+                          baseUrl = 'https://api.openai.com/v1';
+                          model = 'gpt-4o-mini';
+                        }
+                        saveAiConfig({ ...aiConfig, provider: prov, baseUrl, model });
+                      }}
+                      className="w-full text-xs rounded-lg px-2.5 py-1.5 bg-black/20 border"
+                      style={{ borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
+                    >
+                      <option value="deepseek">DeepSeek (推荐，性价比最高)</option>
+                      <option value="openai">OpenAI (GPT-4o-mini / GPT-4o)</option>
+                      <option value="custom">其他 OpenAI 兼容接口</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] block mb-1 font-medium" style={{ color: 'var(--t-faint)' }}>API Key</label>
+                    <input
+                      type="password"
+                      placeholder="sk-..."
+                      value={aiConfig.apiKey}
+                      onChange={e => saveAiConfig({ ...aiConfig, apiKey: e.target.value })}
+                      className="w-full text-xs rounded-lg px-2.5 py-1.5 bg-black/20 border focus:outline-none"
+                      style={{ borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
+                    />
+                    <div className="text-[9px] mt-1" style={{ color: 'var(--t-faint)' }}>
+                      Key 仅保存在您本地浏览器中，绝不上报或泄露。
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] block mb-1 font-medium" style={{ color: 'var(--t-faint)' }}>API Base URL</label>
+                    <input
+                      type="text"
+                      value={aiConfig.baseUrl}
+                      onChange={e => saveAiConfig({ ...aiConfig, baseUrl: e.target.value })}
+                      className="w-full text-xs rounded-lg px-2.5 py-1.5 bg-black/20 border focus:outline-none"
+                      style={{ borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] block mb-1 font-medium" style={{ color: 'var(--t-faint)' }}>模型名称</label>
+                    <input
+                      type="text"
+                      value={aiConfig.model}
+                      onChange={e => saveAiConfig({ ...aiConfig, model: e.target.value })}
+                      className="w-full text-xs rounded-lg px-2.5 py-1.5 bg-black/20 border focus:outline-none"
+                      style={{ borderColor: 'var(--t-border)', color: 'var(--t-text)' }}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                onClick={() => setShowSettings(false)}
+                className="px-4 py-1.5 rounded-lg text-xs font-semibold tracking-wide"
+                style={{
+                  background: 'linear-gradient(135deg, #d4a843, #b8860b)',
+                  color: '#1a1005',
+                }}
+              >
+                保存并完成
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Messages List ── */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-5 space-y-4 min-h-0">
 
         {/* Loading state before first message */}
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="text-4xl mb-3" style={{ color: 'var(--t-gold)', opacity: 0.1 }}>✦</div>
-            <p className="text-[10px] animate-pulse" style={{ color: 'var(--t-faint)' }}>命格解读生成中…</p>
+            <div className="text-4xl md:text-5xl mb-3" style={{ color: 'var(--t-gold)', opacity: 0.1 }}>✦</div>
+            <p className="text-[10px] md:text-xs animate-pulse" style={{ color: 'var(--t-faint)' }}>命格解读生成中…</p>
           </div>
         )}
 
@@ -397,7 +670,7 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
                   className="flex justify-end"
                 >
                   <div
-                    className="max-w-[85%] rounded-xl px-3 py-2 text-[11px]"
+                    className="max-w-[85%] rounded-xl px-3 py-2 md:px-4 md:py-2.5 text-[11px] md:text-xs"
                     style={{
                       background: 'rgba(212,168,67,0.08)',
                       border: '1px solid rgba(212,168,67,0.18)',
@@ -419,11 +692,14 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
                 animate={{ opacity: 1, y: 0 }}
               >
                 <div
-                  className="text-[9px] tracking-widest mb-2 flex items-center gap-1.5"
+                  className="text-[9px] md:text-[10px] tracking-widest mb-1.5 flex items-center gap-1.5"
                   style={{ color: 'var(--t-faint)' }}
                 >
-                  <span style={{ color: 'var(--t-gold)', opacity: 0.4 }}>✦</span>
-                  命理解读
+                  <span style={{ color: 'var(--t-gold)', opacity: 0.5 }}>✦</span>
+                  <span>命理解读</span>
+                  <span className="text-[8px] opacity-60 ml-1">
+                    ({aiConfig.enabled && aiConfig.apiKey ? aiConfig.model || '大模型' : '倪师古籍离线引擎'})
+                  </span>
                 </div>
                 <AiContent text={msg.content} streaming={loading && isLastMsg} />
               </motion.div>
@@ -433,7 +709,7 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
       </div>
 
       {/* ── Input ── */}
-      <div className="flex-shrink-0 px-3 pb-3 pt-2" style={{ borderTop: '1px solid var(--t-border)' }}>
+      <div className="flex-shrink-0 px-3 pb-3 pt-2 md:px-4 md:pb-4 md:pt-3" style={{ borderTop: '1px solid var(--t-border)' }}>
         <div className="flex gap-2">
           <input
             type="text"
@@ -442,7 +718,7 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
             placeholder="继续追问，如：今年适合换工作吗？"
             disabled={loading}
-            className="flex-1 rounded-lg px-3 py-2 text-[11px] focus:outline-none transition-colors"
+            className="flex-1 rounded-lg px-3 py-2 md:px-3.5 md:py-2 text-[11px] md:text-xs focus:outline-none transition-colors"
             style={{
               background: 'var(--t-card)',
               border: '1px solid var(--t-border)',
@@ -452,7 +728,7 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
           <button
             onClick={handleSend}
             disabled={loading || !input.trim()}
-            className="px-3 py-2 rounded-lg text-[11px] font-medium transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+            className="px-3 py-2 md:px-4 md:py-2 rounded-lg text-[11px] md:text-xs font-medium transition-all disabled:opacity-30 disabled:cursor-not-allowed"
             style={{
               background: 'rgba(212,168,67,0.15)',
               border: '1px solid rgba(212,168,67,0.25)',

@@ -93,17 +93,17 @@ export default function ChatPanel({ chart }: ChatPanelProps) {
   return (
     <div className="flex flex-col h-full rounded-xl overflow-hidden card-glass">
       {/* 标题 */}
-      <div className="px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--t-border)' }}>
-        <h3 className="text-xs font-medium tracking-widest" style={{ color: 'var(--t-gold)' }}>AI 命盘解读</h3>
-        <p className="text-[10px] mt-0.5" style={{ color: 'var(--t-faint)' }}>倪海厦正宗紫微斗数 · 智慧解析</p>
+      <div className="px-4 py-3 md:px-5 md:py-3.5 flex-shrink-0" style={{ borderBottom: '1px solid var(--t-border)' }}>
+        <h3 className="text-xs md:text-sm font-medium tracking-widest" style={{ color: 'var(--t-gold)' }}>AI 命盘解读</h3>
+        <p className="text-[10px] md:text-xs mt-0.5" style={{ color: 'var(--t-faint)' }}>倪海厦正宗紫微斗数 · 智慧解析</p>
       </div>
 
       {/* 消息列表 */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 md:p-5 space-y-3 min-h-0">
         {messages.length === 0 && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-8">
-            <div className="text-4xl mb-3" style={{ color: 'var(--t-gold)', opacity: 0.15 }}>✦</div>
-            <p className="text-xs leading-relaxed" style={{ color: 'var(--t-faint)' }}>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-8 md:py-10">
+            <div className="text-4xl md:text-5xl mb-3" style={{ color: 'var(--t-gold)', opacity: 0.15 }}>✦</div>
+            <p className="text-xs md:text-sm leading-relaxed" style={{ color: 'var(--t-faint)' }}>
               命盘已生成，可直接提问<br />
               或从下方选择常见问题开始解读
             </p>
@@ -119,7 +119,7 @@ export default function ChatPanel({ chart }: ChatPanelProps) {
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className="max-w-[85%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed"
+                className="max-w-[85%] rounded-xl px-3.5 py-2.5 md:px-4 md:py-3 text-sm md:text-base leading-relaxed"
                 style={msg.role === 'user' ? {
                   background: 'rgba(212,168,67,0.1)',
                   border: '1px solid rgba(212,168,67,0.2)',
@@ -131,9 +131,9 @@ export default function ChatPanel({ chart }: ChatPanelProps) {
                 }}
               >
                 {msg.role === 'assistant' && (
-                  <div className="text-[10px] mb-1" style={{ color: 'var(--t-faint)' }}>命理师 ·</div>
+                  <div className="text-[10px] md:text-xs mb-1" style={{ color: 'var(--t-faint)' }}>命理师 ·</div>
                 )}
-                <div className="whitespace-pre-wrap text-xs leading-relaxed">
+                <div className="whitespace-pre-wrap text-xs md:text-sm lg:text-[15px] leading-relaxed">
                   {msg.content}
                   {loading && i === messages.length - 1 && msg.role === 'assistant' && (
                     <span className="inline-block w-1.5 h-3 ml-0.5 animate-pulse" style={{ background: 'var(--t-gold)', opacity: 0.6 }} />
@@ -147,14 +147,14 @@ export default function ChatPanel({ chart }: ChatPanelProps) {
 
       {/* 预设问题 */}
       {messages.length === 0 && (
-        <div className="px-3 pb-2 flex-shrink-0">
-          <div className="grid grid-cols-2 gap-1.5">
+        <div className="px-3 pb-2 md:px-4 md:pb-3 flex-shrink-0">
+          <div className="grid grid-cols-2 gap-1.5 md:gap-2">
             {PRESET_QUESTIONS.map((q, i) => (
               <button
                 key={i}
                 onClick={() => sendMessage(q)}
                 disabled={loading}
-                className="text-left text-[10px] rounded-lg px-2.5 py-2 transition-all line-clamp-2"
+                className="text-left text-[10px] md:text-xs lg:text-sm rounded-lg px-2.5 py-2 md:px-3 md:py-2.5 transition-all line-clamp-2"
                 style={{
                   color: 'var(--t-text2)',
                   border: '1px solid var(--t-border)',
