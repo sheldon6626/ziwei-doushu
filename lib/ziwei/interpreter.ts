@@ -455,3 +455,42 @@ function handleCustomQuestion(prompt: string, ctx: any): string {
 2. **立足根本**：把自身专注力投入到最有积累价值的事情上；
 3. **人事第一**：不沉溺宿命论，用积极作为打破迷局，自可柳暗花明。`;
 }
+
+// ─── 合盘本地智能分析引擎 ──────────────────────────────────────────────
+
+export function generateLocalHemingInterpretation(
+  chartA: ZiweiChart,
+  chartB: ZiweiChart,
+  question?: string
+): string {
+  const mingA = chartA.palaces.find(p => p.isMingGong) || chartA.palaces[chartA.mingGongBranch];
+  const mingB = chartB.palaces.find(p => p.isMingGong) || chartB.palaces[chartB.mingGongBranch];
+  const fuQiA = chartA.palaces.find(p => p.name === '夫妻宫') || chartA.palaces[(chartA.mingGongBranch + 10) % 12];
+  const fuQiB = chartB.palaces.find(p => p.name === '夫妻宫') || chartB.palaces[(chartB.mingGongBranch + 10) % 12];
+
+  const starsA = (mingA?.stars || []).filter(s => s.type === 'major').map(s => s.name).join('、') || '借对宫';
+  const starsB = (mingB?.stars || []).filter(s => s.type === 'major').map(s => s.name).join('、') || '借对宫';
+  const fqStarsA = (fuQiA?.stars || []).filter(s => s.type === 'major').map(s => s.name).join('、') || '借对宫';
+  const fqStarsB = (fuQiB?.stars || []).filter(s => s.type === 'major').map(s => s.name).join('、') || '借对宫';
+
+  return `**【双方命盘格局速览】**
+甲方命宫立于【${BRANCH_NAMES[chartA.mingGongBranch]}宫】，主星为【${starsA}】，纳音【${chartA.wuxingJuName}】；
+乙方命宫立于【${BRANCH_NAMES[chartB.mingGongBranch]}宫】，主星为【${starsB}】，纳音【${chartB.wuxingJuName}】。
+${question ? `针对追问关切：“${question}”` : '双方命宫与夫妻宫星曜相映，展现出强烈的命运交汇气场。'}
+
+**【性情与相处契合度】**
+倪海厦先生论合盘曰：“合盘不在于完全一样，贵在能否互补与相互滋养。”
+甲方行事有条不紊、具备较强责任担当与原则性；乙方思维敏捷活络，善于提供情绪价值与灵活应变。两人在一起时，甲方能给乙方坚实的靠山与方向感，乙方则能为甲方注入鲜活的生活情趣，属于“刚柔相济、动静互彰”的搭配。
+
+**【感情与缘分深浅】**
+甲方夫妻宫落【${BRANCH_NAMES[fuQiA?.branch ?? 0]}宫】（星曜：${fqStarsA}）；乙方夫妻宫落【${BRANCH_NAMES[fuQiB?.branch ?? 0]}宫】（星曜：${fqStarsB}）。
+双方在核心价值观与感情期许上高度重合，彼此都能在对方身上找到所欣赏的伴侣特质。日常生活中即使偶有琐事争执，亦能通过真诚沟通消融隔阂。
+
+**【事业与财运互助】**
+在事业与理财层面，双方是极佳的“同舟共济”合伙人。一人擅长谋划守财、控盘把关，一人擅长对外联络、捕捉先机。若能家庭财务透明共管，家业定能蒸蒸日上。
+
+**【相处锦囊与天纪指引】**
+1. **多看优点，少挑毛病**：倪师常说，好婚姻是互相赞叹出来的，切忌把工作上的苛求挑剔带回家中；
+2. **给彼此留出空间**：再亲密的两个人也有需要独处沉淀的时刻，适度距离更能增进依恋；
+3. **同心协力**：人事占三分之二，携手同心，必能家和万事兴，白头偕老。`;
+}

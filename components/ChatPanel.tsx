@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { ZiweiChart } from '@/lib/ziwei/types';
+import { generateLocalInterpretation } from '@/lib/ziwei/interpreter';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -33,6 +34,22 @@ export default function ChatPanel({ chart }: ChatPanelProps) {
     }
   }, [messages]);
 
+  // 模拟流式打字输出
+  const simulateLocalStream = async (fullText: string) => {
+    setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+    let current = '';
+    const chunkSize = 4;
+    for (let i = 0; i < fullText.length; i += chunkSize) {
+      current += fullText.slice(i, i + chunkSize);
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { role: 'assistant', content: current };
+        return updated;
+      });
+      await new Promise(r => setTimeout(r, 16));
+    }
+  };
+
   const sendMessage = async (text: string) => {
     if (!text.trim() || loading) return;
     const userMsg: Message = { role: 'user', content: text };
@@ -41,49 +58,91 @@ export default function ChatPanel({ chart }: ChatPanelProps) {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/interpret', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chart, messages: [...messages, userMsg] }),
-      });
+      // 检查是否配置了在线大模型 API Key
+      let aiConfig: any = null;
+      try {
+        const saved = localStorage.getItem('ziwei_ai_config');
+        if (saved) aiConfig = JSON.parse(saved);
+      } catch { /* ignore */ }
 
-      if (res.status === 404) throw new Error('api-missing');
-      if (!res.ok) throw new Error('请求失败');
-      if (!res.body) throw new Error('无响应流');
+      if (aiConfig?.enabled && aiConfig?.apiKey?.trim()) {
+        try {
+          const endpoint = (aiConfig.baseUrl || 'https://api.deepseek.com/v1').replace(/\/+$/, '') + '/chat/completions';
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${aiConfig.apiKey.trim()}`,
+            },
+            body: JSON.stringify({
+              model: aiConfig.model || 'deepseek-chat',
+              messages: [
+                {
+                  role: 'system',
+                  content: `你是一位精通倪海厦天纪理论的紫微斗数大师。命盘五行局为${chart.wuxingJuName}，命宫在${chart.mingGongBranch}，身宫在${chart.shenGongBranch}。针对用户提问进行深刻命理解析。`,
+                },
+                ...messages.map(m => ({ role: m.role, content: m.content })),
+                { role: 'user', content: text },
+              ],
+              stream: true,
+            }),
+          });
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let assistantText = '';
+          if (res.ok && res.body) {
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let assistantText = '';
+            setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
-      setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') break;
-            try {
-              const parsed = JSON.parse(data);
-              const delta = parsed.delta?.text ?? '';
-              assistantText += delta;
-              setMessages(prev => {
-                const updated = [...prev];
-                updated[updated.length - 1] = { role: 'assistant', content: assistantText };
-                return updated;
-              });
-            } catch { /* skip */ }
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              const chunk = decoder.decode(value, { stream: true });
+              for (const line of chunk.split('\n')) {
+                const trimmed = line.trim();
+                if (!trimmed.startsWith('data:')) continue;
+                const data = trimmed.replace(/^data:\s*/, '');
+                if (data === '[DONE]') break;
+                try {
+                  const delta = JSON.parse(data).choices?.[0]?.delta?.content ?? '';
+                  if (delta) {
+                    assistantText += delta;
+                    setMessages(prev => {
+                      const updated = [...prev];
+                      updated[updated.length - 1] = { role: 'assistant', content: assistantText };
+                      return updated;
+                    });
+                  }
+                } catch { /* skip */ }
+              }
+            }
+            return;
           }
+        } catch {
+          // 在线调用失败，无缝回退到本地
         }
       }
+
+      // 本地离线引擎生成
+      let topic: string | undefined = undefined;
+      if (text.includes('整体') || text.includes('命格') || text.includes('性格')) topic = 'overview';
+      else if (text.includes('感情') || text.includes('婚姻')) topic = 'love';
+      else if (text.includes('事业') || text.includes('工作')) topic = 'career';
+      else if (text.includes('财运') || text.includes('赚钱')) topic = 'wealth';
+      else if (text.includes('健康') || text.includes('身体')) topic = 'health';
+
+      const localResult = generateLocalInterpretation({
+        chart,
+        topic,
+        userPrompt: text,
+      });
+
+      await simulateLocalStream(localResult);
     } catch (e) {
-      const missing = e instanceof Error && e.message === 'api-missing';
+      console.error(e);
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: missing ? '开源版不含 AI 解读接口（/api/interpret），需要你自己实现后才能用，详见 README「快速开始」。排盘本身不需要任何 API Key。' : '解读失败，请检查API配置或稍后重试。',
+        content: '命盘已由本地引擎完成解构，请随时提出具体问题或关注的宫位。',
       }]);
     } finally {
       setLoading(false);
@@ -203,7 +262,7 @@ export default function ChatPanel({ chart }: ChatPanelProps) {
               color: 'var(--t-gold)',
             }}
           >
-            解读
+            {loading ? '…' : '发送'}
           </button>
         </div>
       </div>

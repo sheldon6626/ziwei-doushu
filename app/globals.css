@@ -107,6 +107,32 @@ body {
   line-height: 1.6;
 }
 
+@media (min-width: 1024px) {
+  body {
+    font-size: 15px;
+    line-height: 1.65;
+  }
+  .btn-primary, .btn-accent {
+    font-size: 15px;
+    padding: 13px 30px;
+  }
+  .btn-ghost {
+    font-size: 15px;
+    padding: 12px 24px;
+  }
+  .input-base {
+    font-size: 15px;
+    padding: 11px 16px;
+  }
+  .tab-item {
+    font-size: 14px;
+    padding: 8px 18px;
+  }
+  .label-section {
+    font-size: 12px;
+  }
+}
+
 /* ─── 滚动条 ─────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: var(--bg-1); }
